@@ -21,8 +21,9 @@ client = mlflow.tracking.MlflowClient()
 @click.option("--port", help="Port (default is 8502).", default="8502", type=int)
 @click.option("--tfs-model-name", help="TensorFlow Serving model name.", required=True, type=str)
 @click.option("--execute-as-commands-file", help="Due to bug, execute all docker commands together in one commands file. Default is True", default=True, type=bool)
+@click.option("--hd5", help="Convert from HD5 to TensorFlow SavedModel format", default=False, type=bool)
 
-def main(model_uri, tfs_model_name, base_container, container, port, execute_as_commands_file):
+def main(model_uri, tfs_model_name, base_container, container, port, execute_as_commands_file, hd5):
     print("Options:")
     for k,v in locals().items(): print(f"  {k}: {v}")
 
@@ -34,39 +35,48 @@ def main(model_uri, tfs_model_name, base_container, container, port, execute_as_
     local_path = _download_artifact_from_uri(model_uri)
     print("local_path:",local_path)
 
-    with TempDir() as tmp:
-        savedmodel_path = tmp.path()
-        savedmodel_dir = os.path.basename(savedmodel_path)
+    # If HD5 model, need to convert it to SavedModel format
+    if hd5:
+        with TempDir() as tmp:
+            savedmodel_path = tmp.path()
+            tf.keras.models.save_model(model, savedmodel_path, overwrite=True, include_optimizer=True)
+            print("savedmodel_path:",savedmodel_path)
+            process(tfs_model_name, base_container, container, port, execute_as_commands_file, savedmodel_path)
+    # If SavedModel format
+    else:
+        savedmodel_path  = os.path.join(local_path,"data/model") # MLflow internal path to SavedModel artiact
         print("savedmodel_path:",savedmodel_path)
+        process(tfs_model_name, base_container, container, port, execute_as_commands_file, savedmodel_path)
 
-        # Convert MLflow Keras model from HD5 to SavedModel format
-        tf.keras.models.save_model(model, savedmodel_path, overwrite=True, include_optimizer=True)
+def process(tfs_model_name, base_container, container, port, execute_as_commands_file, savedmodel_path):
+    savedmodel_dirname = os.path.basename(savedmodel_path)
+    print("savedmodel_dirname:",savedmodel_dirname)
 
-        # Setup docker commands
-        base_image = "tensorflow/serving"
-        commands = [
-            f"docker run -d --name {base_container} {base_image}" ,
-            f"docker cp {savedmodel_path}/ {base_container}:/tmp",
-            f"docker exec -d {base_container} mkdir -p /models/{tfs_model_name}",
-            f"docker exec -d {base_container} mv /tmp/{savedmodel_dir} /models/{tfs_model_name}/01", # 01 is TFS model version
-            f'docker commit --change "ENV MODEL_NAME {tfs_model_name}" {base_container} {container}' ,
-            f"docker rm -f {base_container}",
-            f"docker run -d --name {container} -p {port}:8501 {container}"
-        ]
+    # Setup docker commands
+    base_image = "tensorflow/serving"
+    commands = [
+        f"docker run -d --name {base_container} {base_image}" ,
+        f"docker cp {savedmodel_path}/ {base_container}:/tmp",
+        f"docker exec -d {base_container} mkdir -p /models/{tfs_model_name}",
+        f"docker exec -d {base_container} mv /tmp/{savedmodel_dirname} /models/{tfs_model_name}/01", # 01 is required TFS model version
+        f'docker commit --change "ENV MODEL_NAME {tfs_model_name}" {base_container} {container}' ,
+        f"docker rm -f {base_container}",
+        f"docker run -d --name {container} -p {port}:8501 {container}"
+    ]
 
-        # Execute each command individually
-        if execute_as_commands_file:
-            commands_file = "commands.sh"
-            with open(commands_file, "w") as fp:
-                fp.write("\n")
-                for cmd in commands:
-                    fp.write(f"{cmd}\n")
-            commands_file = os.path.abspath(commands_file)
-            run_command(f"sh {commands_file}")
-        # Execute all command as one script because docker commit fails mysterioulsy. See README.md.
-        else:
+    # Execute all command as one script because docker commit fails mysterioulsy. See README.md.
+    if execute_as_commands_file:
+        commands_file = "commands.sh"
+        with open(commands_file, "w") as fp:
+            fp.write("\n")
             for cmd in commands:
-                run_command(cmd)
+                fp.write(f"{cmd}\n")
+        commands_file = os.path.abspath(commands_file)
+        run_command(f"sh {commands_file}")
+    # Execute each command individually
+    else:
+        for cmd in commands:
+            run_command(cmd)
 
 def run_command(cmd):
     print("Running command:",cmd)
@@ -78,7 +88,7 @@ def check_proc(proc, cmd):
     if (proc.stderr):
         output = proc.stderr.read()
         if len(output) > 0:
-            raise Exception(f"Failed to execute command '{cmd}'. Error: {output}")
+            raise Exception(f"Failed to execute command '{cmd}'. ERROR: {output}")
 
 if __name__ == "__main__":
     main()

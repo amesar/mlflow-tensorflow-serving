@@ -61,6 +61,7 @@ Options:
                                   Due to bug, execute all docker commands
                                   together in one commands file. Default is
                                   True
+  --hd5 BOOLEAN                   Convert from HD5 to TensorFlow SavedModel format
 ```
 
 The `model-uri` option can be either a `runs` or `models` URI such as:
