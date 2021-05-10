@@ -6,10 +6,8 @@ Based upon: https://www.tensorflow.org/tfx/serving/docker#creating_your_own_serv
 import os
 from subprocess import Popen, PIPE
 import click
-import tensorflow as tf
 import mlflow
 import mlflow.keras
-from mlflow.utils.file_utils import TempDir
 from mlflow.tracking.artifact_utils import _download_artifact_from_uri
 
 client = mlflow.tracking.MlflowClient()
@@ -21,9 +19,8 @@ client = mlflow.tracking.MlflowClient()
 @click.option("--port", help="Port (default is 8502).", default="8502", type=int)
 @click.option("--tfs-model-name", help="TensorFlow Serving model name.", required=True, type=str)
 @click.option("--execute-as-commands-file", help="Due to bug, execute all docker commands together in one commands file. Default is True", default=True, type=bool)
-@click.option("--hd5", help="Convert from HD5 to TensorFlow SavedModel format", default=False, type=bool)
 
-def main(model_uri, tfs_model_name, base_container, container, port, execute_as_commands_file, hd5):
+def main(model_uri, tfs_model_name, base_container, container, port, execute_as_commands_file):
     print("Options:")
     for k,v in locals().items(): print(f"  {k}: {v}")
 
@@ -35,18 +32,9 @@ def main(model_uri, tfs_model_name, base_container, container, port, execute_as_
     local_path = _download_artifact_from_uri(model_uri)
     print("local_path:",local_path)
 
-    # If HD5 model, need to convert it to SavedModel format
-    if hd5:
-        with TempDir() as tmp:
-            savedmodel_path = tmp.path()
-            tf.keras.models.save_model(model, savedmodel_path, overwrite=True, include_optimizer=True)
-            print("savedmodel_path:",savedmodel_path)
-            process(tfs_model_name, base_container, container, port, execute_as_commands_file, savedmodel_path)
-    # If SavedModel format
-    else:
-        savedmodel_path  = os.path.join(local_path,"data/model") # MLflow internal path to SavedModel artiact
-        print("savedmodel_path:",savedmodel_path)
-        process(tfs_model_name, base_container, container, port, execute_as_commands_file, savedmodel_path)
+    savedmodel_path  = os.path.join(local_path,"data/model") # MLflow internal path to SavedModel artiact
+    print("savedmodel_path:",savedmodel_path)
+    process(tfs_model_name, base_container, container, port, execute_as_commands_file, savedmodel_path)
 
 def process(tfs_model_name, base_container, container, port, execute_as_commands_file, savedmodel_path):
     savedmodel_dirname = os.path.basename(savedmodel_path)
@@ -66,7 +54,7 @@ def process(tfs_model_name, base_container, container, port, execute_as_commands
 
     # Execute all command as one script because docker commit fails mysterioulsy. See README.md.
     if execute_as_commands_file:
-        commands_file = "commands.sh"
+        commands_file = "_commands.sh"
         with open(commands_file, "w") as fp:
             fp.write("\n")
             for cmd in commands:

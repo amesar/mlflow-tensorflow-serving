@@ -1,40 +1,21 @@
 # Serve MLflow Keras model with TensorFlow Serving
 
-Creates a [TensorFlow Serving](https://www.tensorflow.org/tfx/guide/serving) Docker container with an embedded MLflow Keras TensorFlow 2 model.
+Creates a [TensorFlow Serving](https://www.tensorflow.org/tfx/guide/serving) Docker container with an embedded MLflow Keras TensorFlow model.
+
 
 ## Overview
 
-**Summary**
-* Based upon TensorFlow documentation [Creating your own serving image](https://www.tensorflow.org/tfx/serving/docker#creating_your_own_serving_image).
+* Based upon TensorFlow documentation: [Creating your own serving image](https://www.tensorflow.org/tfx/serving/docker#creating_your_own_serving_image).
 * Source code: [launch_tensorflow_serving.py](launch_tensorflow_serving.py).
-
-**Basic steps**
-* First create an MLflow Keras TensorFlow 2 model which will be in HD5 format.
-* Convert the HD5 model to SavedModel format.
-* Create and launch a TensorFlow Serving container with the SavedModel model.
-* Score against the container.
-
-**Notes**
 * TensorFlow Serving requires models to be in the [SavedModel](https://www.tensorflow.org/guide/saved_model) format.
-  * SavedModel (Protobuf based) is the default model format for Keras TensorFlow 2.
-  * TensorFlow Serving cannot serve models stored in the legacy HD5 format of Keras TensorFlow 1.
-* MLflow currently can only log a Keras model in the HD5 format. See issues:
-  * [3224](https://github.com/mlflow/mlflow/issues/3224) - `[BUG] Cannot save Keras/TF_2.x model as SavedModel format using mlflow.keras.log_model with kwargs { "save_format": "tf" }`.
-  * [3246](https://github.com/mlflow/mlflow/issues/3246) - `[FR] Serialization format for TensorFlow 2.x (Keras) model should be SavedModel per TF 2.0 doc`.
+* Train an MLflow Keras TensorFlow 2 model as a run and register it with the MLflow model registry.
 * MNIST dataset to score is in TensorFlow Serving JSON format. See [data/mnist.json](data/mnist.json).
-
-
-## TODO
-
-* Fix issue 3246 so Keras models are logged as SavedModel flavor.
-* Promote this solution into issue 3303.
-* Fix `docker commit` bug. See below.
 
 ## Setup
 
 1. Install docker on your machine.
 
-2. Create an MLflow Keras TensorFlow run. Note that it will be in the HD5 format.
+2. Create an MLflow Keras TensorFlow run and register the model.
 You can use the [keras_tf_mnist](https://github.com/amesar/mlflow-examples/tree/master/python/keras_tf_mnist#training) example.
 
 3. Create and activate your conda environment.
@@ -61,15 +42,18 @@ Options:
                                   Due to bug, execute all docker commands
                                   together in one commands file. Default is
                                   True
-  --hd5 BOOLEAN                   Convert from HD5 to TensorFlow SavedModel format
 ```
 
 The `model-uri` option can be either a `runs` or `models` URI such as:
-* runs:/774f1d5e4573499a8eb2043c397cd98a/keras-model
-* models:/keras_wine/production
-* models:/keras_wine/1
+```
+runs:/774f1d5e4573499a8eb2043c397cd98a/keras-model
+```
+```
+models:/keras_wine/production
+models:/keras_wine/1
+```
 
-## Run
+## Build and launch container
 
 ```
 python launch_tensorflow_serving.py \
@@ -78,29 +62,6 @@ python launch_tensorflow_serving.py \
   --container tfs_serving_keras_mnist
 ```
 
-### Bug
-
-When running the docker commands individually with Popen (--execute-as-commands-file False), `docker commit` fails mysterioulsy with the following error.
-
-```
-Failed to execute command 'docker commit --change "ENV MODEL_NAME keras_mnist" tfs_serving_base tfs_serving_keras_mnist'. Error: "docker commit" requires at least 1 and at most 2 arguments.
-```
-
-When all docker commands are run in one script with Popen, no error occurs.
-
-Therefore, the current workaround is to collect all the docker commands into a `docker_commands` file (_commands.sh) and execute this file with one Popen call.
-
-
-#### Docker commands file example
-```
-docker run -d --name tfs_serving_base tensorflow/serving
-docker cp /var/folders/rp/88lfxw2n4lvgkdk9xl0lkqjr0000gp/T/tmpf2k0n9ti/ tfs_serving_base:/tmp
-docker exec -d tfs_serving_base mkdir -p /models/keras_mnist
-docker exec -d tfs_serving_base mv /tmp/tmpf2k0n9ti /models/keras_mnist/01
-docker commit --change "ENV MODEL_NAME keras_mnist" tfs_serving_base tfs_serving_keras_mnist
-docker rm -f tfs_serving_base
-docker run -d --name tfs_serving_keras_mnist -p 8502:8501 tfs_serving_keras_mnist
-```
 
 ## Score
 
@@ -145,3 +106,28 @@ curl -X POST \
 }
 ```
 
+## TODO
+
+### Bug
+
+When running the docker commands individually with `Popen (--execute-as-commands-file False)`, `docker commit` fails mysterioulsy with the following error.
+
+```
+Failed to execute command 'docker commit --change "ENV MODEL_NAME keras_mnist" tfs_serving_base tfs_serving_keras_mnist'. Error: "docker commit" requires at least 1 and at most 2 arguments.
+```
+
+When all docker commands are run in one script with `Popen`, no error occurs.
+
+Therefore, the current workaround is to collect all the docker commands into a `docker_commands` file (_commands.sh) and execute this file with one `Popen` call.
+
+
+#### Docker commands file example
+```
+docker run -d --name tfs_serving_base tensorflow/serving
+docker cp /var/folders/rp/88lfxw2n4lvgkdk9xl0lkqjr0000gp/T/tmpf2k0n9ti/ tfs_serving_base:/tmp
+docker exec -d tfs_serving_base mkdir -p /models/keras_mnist
+docker exec -d tfs_serving_base mv /tmp/tmpf2k0n9ti /models/keras_mnist/01
+docker commit --change "ENV MODEL_NAME keras_mnist" tfs_serving_base tfs_serving_keras_mnist
+docker rm -f tfs_serving_base
+docker run -d --name tfs_serving_keras_mnist -p 8502:8501 tfs_serving_keras_mnist
+```
