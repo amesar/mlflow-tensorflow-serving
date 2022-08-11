@@ -92,6 +92,8 @@ curl -X POST \
 ```
 ### Score MNIST PNG file
 
+Source [convert_png_to_tfs_json.py](convert_png_to_tfs_json.py).
+
 We first convert the PNG file to JSON format.
 
 ```
